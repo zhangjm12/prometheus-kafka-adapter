@@ -17,13 +17,12 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
-	"strconv"
+	"math"
 	"time"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/sirupsen/logrus"
-
 	"github.com/linkedin/goavro"
 )
 
@@ -35,6 +34,18 @@ type Serializer interface {
 // Serialize generates the JSON representation for a given Prometheus metric.
 func Serialize(s Serializer, req *prompb.WriteRequest) ([][]byte, error) {
 	result := [][]byte{}
+	type meta struct {
+		Region    interface{} `json:"region"`
+		TenantId  interface{}  `json:"tenantId"`
+
+	}
+	type metric struct {
+		Name            interface{} `json:"name"`
+		Dimensions     interface{}  `json:"dimensions"`
+		Value          interface{}    `json:"value"`
+		Value_meta     interface{}   `json:"value_meta"`
+		Timestamp     interface{}  `json:"timestamp"`
+	}
 
 	for _, ts := range req.Timeseries {
 		labels := make(map[string]string, len(ts.Labels))
@@ -44,15 +55,35 @@ func Serialize(s Serializer, req *prompb.WriteRequest) ([][]byte, error) {
 		}
 
 		for _, sample := range ts.Samples {
+                        if math.IsNaN(sample.Value){
+                                continue
+                        }
+			if string(labels["__name__"]) == "kube_namespace_annotations" {
+				continue
+			}
+			m:=map[string]interface{}{
+				"meta":meta{
+					Region: "useast",
+					TenantId: "9f82fecad9604e79ac99d2922faf7326",
+				},
+				"metric":metric{
+					Name           :string(labels["__name__"]),
+					Dimensions     :labels,
+					Value          :sample.Value,			// strconv.FormatFloat(sample.Value, 'f', -1, 64),
+					Value_meta     :map[string]string{},
+					Timestamp      :sample.Timestamp,
+				},
+				"creation_time": time.Now().Unix(),
+			}
+			/*
 			epoch := time.Unix(sample.Timestamp/1000, 0).UTC()
-
 			m := map[string]interface{}{
 				"timestamp": epoch.Format(time.RFC3339),
 				"value":     strconv.FormatFloat(sample.Value, 'f', -1, 64),
 				"name":      string(labels["__name__"]),
 				"labels":    labels,
 			}
-
+			*/
 			data, err := s.Marshal(m)
 			if err != nil {
 				logrus.WithError(err).Errorln("couldn't marshal timeseries")
